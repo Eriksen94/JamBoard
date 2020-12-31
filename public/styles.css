@@ -1,0 +1,18 @@
+html , body {
+	background: #212121; 
+	color: #fff; 
+	font-family: Helvetica;
+	margin: 0; 
+	padding: 0;
+}
+
+#viewport {
+	border:solid 0.2rem white;
+    width: 90%;
+    padding: 0px;   
+}
+
+.centered {
+    text-align: center;
+}
+
