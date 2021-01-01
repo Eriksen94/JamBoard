@@ -1,5 +1,22 @@
 let debug = true;
 
+var canvas = document.getElementById("viewport");
+var context = canvas.getContext("2d");
+var gameData = {
+  size: { rows: 5, cols: 5 },
+  boardState: new Array(),
+  lastPlayerID: 1,
+  players: new Array(),
+  targetScore: 100
+};
+
+function Player(uuid, id, colour, score) {
+  this.uuid = uuid;
+  this.id = id;
+  this.colour = colour;
+  this.score = score;
+}
+
 function changeTitle(str) {
   $("#page-title").text("Hello: " + str);
 }
@@ -11,34 +28,26 @@ $(() => {
   $("#setup-btn").click(function () {
     var data = { rows: $("#rows").val(), cols: $("#cols").val() };
     $.post("http://localhost:3000/test", data);
+    //clear any existing game data
+    clearGameData();
+    gameData.size.rows = $("#rows").val();
+    gameData.size.cols = $("#cols").val();
+    for(let i = 0; i < $("#playerCount").val(); i++){
+      gameData.players.push(generatePlayers(i+1));
+    }
+    gameData.targetScore = $("#targetScore").val();
+    gameData.boardState = drawBoard(gameData.size);
   });
 });
 
 socket.on("socketCall", drawBoard);
-
-var canvas = document.getElementById("viewport");
-var context = canvas.getContext("2d");
-var gameData = {
-  size: { rows: 5, cols: 5 },
-  boardState: new Array(),
-  lastPlayerID: 1,
-  players: new Array(),
-  targetScore: 100,
-};
-
-function Player(uuid, id, colour, score) {
-  this.uuid = uuid;
-  this.id = id;
-  this.colour = colour;
-  this.score = score;
-}
 
 //check where mouse click is on canvas (scaled for css size changes)
 canvas.addEventListener("mousedown", function (e) {
   let t = getMousePos(canvas, e);
   let s = boardClick(t, gameData.boardState, gameData.lastPlayerID);
   fillBoard(gameData.boardState, gameData.players);
-  gameData.players[gameData.lastPlayerID - 1].score += s;
+  gameData.players[gameData.lastPlayerID - 1].score += s.score;
   if (debug)
     console.log(
       "player: " +
@@ -46,8 +55,25 @@ canvas.addEventListener("mousedown", function (e) {
         ", score: " +
         gameData.players[gameData.lastPlayerID - 1].score
     );
-  gameData.lastPlayerID++;
-  if (gameData.lastPlayerID > 2) gameData.lastPlayerID = 1;
+  if(s.updated) gameData.lastPlayerID++;
+  if (gameData.lastPlayerID > gameData.players.length) gameData.lastPlayerID = 1;
+
+  //check if the board is full - declare winner
+  for(let i = 0; i < gameData.boardState.length; i++){
+    for(let j = 0; j < gameData.boardState[0].length; j++){
+      if(gameData.boardState[i][j] === 0){
+        //0 entry found, board is not full
+        break;
+      }
+      else if(i === gameData.boardState.length -1 && j === gameData.boardState[0].length -1 ){
+        //made it to the last entry without finding a 0 entry
+        let winner = checkWinner(gameData.players, gameData.targetScore);
+        if(debug) console.log(winner);
+        if(debug) console.log(gameData.players);
+      }
+    }
+  }
+
 });
 
 //return mouse position on a canvas from a mousedown event listener - scaled for css size changes
@@ -95,9 +121,12 @@ function drawBoard(size, verbose = false) {
 
   let tempBoard = new Array();
   for (let i = 0; i < size.rows; i++) {
+    let a = new Array(size.cols); for (let j=0; j<size.cols; ++j) a[j] = 0;
     let tempRow = new Array(size.cols).fill(0);
-    tempBoard.push(tempRow);
+    if (verbose) console.log(a);
+    tempBoard.push(a);
   }
+  if (verbose) console.log(tempBoard);
   return tempBoard;
 }
 
@@ -105,7 +134,6 @@ function drawBoard(size, verbose = false) {
 //params: boardState[rows][cols] - 0 = blank, otherwise filled with player id
 //playersArr[] {uuid: , id: , colour} - match id and colour for fill colour
 function fillBoard(boardState, playersArr, verbose = false) {
-  if (verbose) console.log(boardState);
   //board state - 2d array of rows and cols indicating filled or blank
   let ht = canvas.height;
   let wd = canvas.width;
@@ -154,7 +182,8 @@ function fillBoard(boardState, playersArr, verbose = false) {
 
 //check which grid space a click on the canvas occurred in
 //if the space is available update the board state for the player
-//return: score of the move and update script scope board state - draw updated board elsewhere
+//return: score of the move, if a move was accepted {score: , updated: }
+//update script scope board state - draw updated board elsewhere
 //Params: clickPos = {x: , y: } scaled position of the cursor when pressed down on canvas element, calculated in event listener
 //boardState[rows][cols] - array of board state 0 or player id
 //playerID - id for the player that made the click - enforce turn requirements elsewhere
@@ -197,9 +226,9 @@ function boardClick(clickPos, boardState, playerID, verbose = false) {
   //update score
   let moveScore = 0;
   if (update) {
-    moveScore = scoreMove(playerID, move, boardState);
+    moveScore = scoreMove(playerID, move, boardState, verbose);
   }
-  return moveScore;
+  return {score: moveScore, updated: update};
 }
 
 //score move by checking surrounding board state - vertical add, horizontal subtract
@@ -305,6 +334,52 @@ function scoreMove(playerID, move, board, verbose = false) {
   return addToScore;
 }
 
+function generatePlayers(localID){
+  let colours = [
+    "#F30E0E",
+    "#f3db0e",
+    "#88F30E",
+    "#0EF395",
+    "#0E84F3",
+    "#C80EF3",
+    "#F30E94",
+    "#0E1D45",
+    "#7CAC88",
+    "#FFFFFF",
+  ];
+  return new Player("p"+localID+"-uuid", localID, colours[localID-1], 0);
+}
+
+function clearGameData(){
+  gameData.size = { rows: 5, cols: 5 }
+  gameData.boardState.length = 0;
+  gameData.lastPlayerID = 1;
+  gameData.players.length = 0;
+  gameData.targetScore = 100;
+}
+
+function checkWinner(playerArr, targetScore, verbose=false){
+  if(verbose) console.log(playerArr);
+  if(verbose) console.log(targetScore);
+  let winnerLocalID = 1;
+  let smallestDelta = Math.abs(playerArr[0].score - targetScore);
+  let tie = false;
+  if(verbose)console.log("delta: " + smallestDelta + ", id: " + winnerLocalID);
+  for(let i = 1; i < playerArr.length; i++){
+    let tempDelta = Math.abs(playerArr[i].score - targetScore);
+    if(tempDelta < smallestDelta){
+      smallestDelta = tempDelta;
+      winnerLocalID = i+1;
+      tie = false;
+    }
+    else if(tempDelta === smallestDelta){
+      tie = true;
+    }
+    if(verbose)console.log("delta: " + tempDelta + ", id: " + (i+1));
+  }
+  return {tied: tie, winner: winnerLocalID, closestScore: playerArr[winnerLocalID-1].score};
+}
+
 function testFill() {
   gameData.size = { rows: 6, cols: 6 };
   gameData.boardState = drawBoard(gameData.size, debug);
@@ -328,4 +403,4 @@ function testFill() {
   // scoreMove(player, move, board);
 }
 
-testFill();
+//testFill();
