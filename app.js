@@ -23,8 +23,14 @@ app.get("/test", function (req, res) {
   res.send("text string");
 });
 
-app.post("/test", function (req, res) {
-  io.emit("socketCall", req.body);
+app.post("/setup", function (req, res) {
+  io.emit("call_setup", req.body);
+  console.log("posted");
+  res.sendStatus(200);
+});
+
+app.post("/update", function (req, res) {
+  io.emit("call_update", req.body);
   console.log("posted");
   res.sendStatus(200);
 });

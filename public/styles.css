@@ -6,6 +6,10 @@ html , body {
 	padding: 0;
 }
 
+p {
+	color: #FFF;
+}
+
 #viewport {
 	border:solid 0.2rem white;
     width: 90%;
