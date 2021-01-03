@@ -1,5 +1,7 @@
 # Number Jam
 
+https://number-jam.herokuapp.com
+
 A turn based game of filling in a grid and competing to be the closest to the target score
 Rules:
 
@@ -17,3 +19,12 @@ Design:
 
 * made as a node.js application using socket.io for real time matching between the game boards
 * implements a lobby system for hosting and joining games
+
+Improvements:
+
+* numbers on board
+* fill in edges
+* highlight colours for player - score and top
+* randomize player order on start
+* show points on mouseover
+* desync breaks game - need rejoin or force update options
