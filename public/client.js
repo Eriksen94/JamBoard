@@ -8,7 +8,9 @@ var gameData = {
   currentPlayerID: 1,
   players: new Array(),
   targetScore: 100,
-  lastMove: [0,0]
+  lastMove: [0, 0],
+  hostID: "",
+  playerID: "",
 };
 
 function Player(uuid, id, colour, score) {
@@ -21,7 +23,35 @@ function Player(uuid, id, colour, score) {
 var socket = io();
 
 socket.on("call_setup", remoteSetupGame);
-socket.on("call_update", remoteUpdateGame)
+socket.on("call_update", remoteUpdateGame);
+socket.on("on_connect", handleConnection);
+socket.on("send_home", sendHome);
+
+function sendHome(){
+  window.location.href = window.location.origin;
+}
+
+//assign player client IDs to player objects for turns
+function handleConnection(ids) {
+  if(debug)console.log(ids);
+  gameData.hostID = ids.host;
+  gameData.playerID = ids.player;
+
+  //url is lobby/host or lobby/join/gameID depending on previous selection
+  let path = window.location.pathname;
+  if(path.includes("host")){
+    let setupID = {host: gameData.hostID, player: gameData.playerID};
+    socket.emit("host_setup", setupID);
+    $("#lobby-num").html("Lobby id:  " + gameData.hostID);
+  }
+  else{
+    let joinRequest = path.substring(path.lastIndexOf("/")+5,path.length); //+5 for "join" offset
+    socket.emit("join_lobby", {join: joinRequest, player: gameData.playerID});
+    if(debug) console.log(joinRequest);
+    gameData.hostID = joinRequest;
+    $("#lobby-num").html("Lobby id:  " + gameData.hostID);
+  }
+}
 
 //client side AJAX is needed for post method without reloading/redirecting
 $(() => {
@@ -38,7 +68,7 @@ $(() => {
     $("#turnInd").html("Player 1 start");
     $("#scoreDisplay").html("");
 
-    $.post("http://localhost:3000/setup", gameData);
+    $.post(window.location.origin + "/setup", gameData);
   });
 });
 
@@ -52,23 +82,23 @@ canvas.addEventListener("mousedown", function (e) {
 
   //validate move, update board array data and calc score
   let s = boardClick(t, gameData.boardState, gameData.currentPlayerID, debug);
+  if(debug)console.log("click for: ");
+  if(debug)console.log(s);
   gameData.players[gameData.currentPlayerID - 1].score += s.score;
 
   //move to next turn
   if (s.updated) gameData.currentPlayerID++;
-  if (gameData.currentPlayerID > gameData.players.length){
+  if (gameData.currentPlayerID > gameData.players.length) {
     gameData.currentPlayerID = 1;
   }
 
-  //updateGame(gameData);
   //calls update functions through socket
-  if(s.updated){
-    $.post("http://localhost:3000/update", gameData);
+  if (s.updated) {
+    $.post(window.location.origin + "/update", gameData);
   }
-
 });
 
-function remoteSetupGame(data){
+function remoteSetupGame(data) {
   clearGameData();
   gameData.size.rows = parseInt(data.size.rows);
   gameData.size.cols = parseInt(data.size.cols);
@@ -86,15 +116,15 @@ function remoteSetupGame(data){
   $("#targetScore").val(gameData.targetScore);
 }
 
-function remoteUpdateGame(data){
+function remoteUpdateGame(data) {
   gameData.size = data.size;
-  for(let x = 0; x < gameData.boardState.length; x++){
-    for(let y = 0; y < gameData.boardState[0].length; y++){
+  for (let x = 0; x < gameData.boardState.length; x++) {
+    for (let y = 0; y < gameData.boardState[0].length; y++) {
       gameData.boardState[x][y] = parseInt(data.boardState[x][y]);
     }
   }
   gameData.currentPlayerID = parseInt(data.currentPlayerID);
-  for(let x = 0; x < gameData.players.length; x++){
+  for (let x = 0; x < gameData.players.length; x++) {
     gameData.players[x].id = parseInt(data.players[x].id);
     gameData.players[x].score = parseInt(data.players[x].score);
   }
@@ -105,7 +135,12 @@ function remoteUpdateGame(data){
   fillBoard(gameData.boardState, gameData.players, debug);
 
   //check if the board is full - declare winner
-  displayWinner(gameData.boardState, gameData.players, gameData.targetScore, debug);
+  displayWinner(
+    gameData.boardState,
+    gameData.players,
+    gameData.targetScore,
+    debug
+  );
 }
 
 //return mouse position on a canvas from a mousedown event listener - scaled for css size changes
@@ -221,7 +256,7 @@ function fillBoard(boardState, playersArr, verbose = false) {
 //boardState[rows][cols] - array of board state 0 or player id
 //playerID - id for the player that made the click - enforce turn requirements elsewhere
 function boardClick(clickPos, boardState, playerID, verbose = false) {
-  if(verbose) console.log(boardState);
+  if (verbose) console.log(boardState);
   //check which grid location the mouse press occurred
   let ht = canvas.height;
   let wd = canvas.width;
@@ -381,7 +416,7 @@ function generatePlayers(localID) {
     "#7CAC88",
     "#FFFFFF",
   ];
-  return new Player("p" + localID + "-uuid", localID, colours[localID - 1], 0);
+  return new Player("", localID, colours[localID - 1], 0);
 }
 
 function clearGameData() {
@@ -392,10 +427,10 @@ function clearGameData() {
   gameData.targetScore = 100;
 }
 
-function displayScores(players, playerID){
-  let turnStr = "Player " + (playerID) + "'s turn ";
-  let scoreStr ="";
-  for(let i = 0; i < players.length; i++){
+function displayScores(players, playerID) {
+  let turnStr = "Player " + playerID + "'s turn ";
+  let scoreStr = "";
+  for (let i = 0; i < players.length; i++) {
     let str = "Player " + players[i].id + " score: " + players[i].score + " | ";
     scoreStr += str;
   }
@@ -403,32 +438,29 @@ function displayScores(players, playerID){
   $("#turnInd").html(turnStr);
 }
 
-function displayWinner(boardState, players, targetScore, verbose = false){
-  if(verbose) console.log(boardState);
+function displayWinner(boardState, players, targetScore, verbose = false) {
+  if (verbose) console.log(boardState);
+  let emptyCount = 0;
   for (let i = 0; i < boardState.length; i++) {
     for (let j = 0; j < boardState[0].length; j++) {
-      if (boardState[i][j] === 0) {
-        //0 entry found, board is not full
-        break;
-      } else if (
-        i === boardState.length - 1 &&
-        j === boardState[0].length - 1
-      ) {
-        //made it to the last entry without finding a 0 entry
-        if(verbose) console.log("no empty spaces found");
-        let winner = checkWinner(players, targetScore, verbose);
-        if (debug) console.log(winner);
-        if (debug) console.log(players);
-        let turnStr = "Player " + winner.winner;
-        if(winner.tied) {
-          turnStr += " tied for first with " + winner.closestScore + " points!";
-        }
-        else{
-          turnStr += " wins!"
-        }
-        $("#turnInd").html(turnStr);
+      console.log(boardState[i][j]);
+      if (boardState[i][j] == 0) {
+        emptyCount++;
       }
     }
+  }
+  if (emptyCount === 0) {
+    if (verbose) console.log("no empty spaces found");
+    let winner = checkWinner(players, targetScore, verbose);
+    if (debug) console.log(winner);
+    if (debug) console.log(players);
+    let turnStr = "";
+    if (winner.tied) {
+      turnStr += "Tie for first with " + winner.closestScore + " points!";
+    } else {
+      turnStr += "Player " + winner.winner + " wins!";
+    }
+    $("#turnInd").html(turnStr);
   }
 }
 

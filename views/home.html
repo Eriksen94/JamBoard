@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <title>Number Jam</title>
+
+    <!-- Load style sheet -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css"
+        integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous" />
+    <link href="/styles.css" media="screen" rel="stylesheet" type="text/css">
+
+
+    <!-- Load socket.io client side contents. -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <!-- bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"
+        integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"
+        integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo"
+        crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/js/bootstrap.min.js"
+        integrity="sha384-OgVRvuATP1z7JjHLkuOU7Xw704+h835Lr+6QL9UvYjZE3Ipu6Tp75j7Bh/kR0JKI"
+        crossorigin="anonymous"></script>
+
+            <!--  jQuery CDN, needs to load prior to the main JS file that uses jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.11.0/umd/popper.min.js"
+        integrity="sha384-b/U6ypiBEHpOf/4+1nzFpr53nxSS+GLCkfwBdFNTxtclqqenISfwAzpKaMNFNmj4"
+        crossorigin="anonymous"></script>
+
+
+</head>
+
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-lg-4"></div>
+            <div class="col-lg-4 centered">
+                <h1 id="page-title">Number Jam</h1>
+                <form action="/host" method="post">
+                    <button type="submit" class="btn btn-light btn-large" id="host-btn">Host New Game</button>
+                </form>
+                <hr>
+                <form action="/join" method="post">
+                    <button type="submit" class="btn btn-outline-light btn-large" id="join-btn">Join Game</button>
+                    <br>
+                    <input type="text" id="game_id" name="game_id" placeholder="Enter Game ID" pattern=".{4,}">
+                </form>
+            </div>
+            <div class="col-lg-4"></div>
+        </div>
+
+        <div class="row">
+            
+        </div>
+    </div>
+</body>
+
+</html>

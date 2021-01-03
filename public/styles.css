@@ -10,6 +10,11 @@ p {
 	color: #FFF;
 }
 
+input {
+	text-align: center;
+	margin: 5px;
+}
+
 #viewport {
 	border:solid 0.2rem white;
     width: 90%;
