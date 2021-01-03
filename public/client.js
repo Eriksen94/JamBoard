@@ -11,6 +11,7 @@ var gameData = {
   lastMove: [0, 0],
   hostID: "",
   playerID: "",
+  inLobby: 1
 };
 
 function Player(uuid, id, colour, score) {
@@ -25,7 +26,42 @@ var socket = io();
 socket.on("call_setup", remoteSetupGame);
 socket.on("call_update", remoteUpdateGame);
 socket.on("on_connect", handleConnection);
+socket.on("update_players", updatePlayers);
+socket.on("player_joined", playerJoined);
+socket.on("player_left", playerLeft);
 socket.on("send_home", sendHome);
+
+function playerJoined(count){
+  gameData.inLobby = count;
+  $("#player-count").html(gameData.inLobby + " players in lobby");
+}
+
+function playerLeft(count){
+  gameData.inLobby--;
+  $("#player-count").html(gameData.inLobby + " players in lobby");
+}
+
+function updatePlayers(idArr){
+  console.log(idArr);
+  gameData.inLobby = idArr.length;
+  let thisPlayer = "";
+  if(gameData.players.length > 0 ){
+    //account for players in lobby being either more of less than players in the game
+    //for more in lobby - assign in order of joining
+    //for more in game - repeat assigns
+    let k = 0;
+    for(let i = 0; i < gameData.players.length; i++){
+      gameData.players[i].uuid = idArr[k];
+      k++;
+      if(k >= idArr.length) k = 0;
+      if(gameData.players[i].uuid === gameData.playerID){
+        if(thisPlayer.length >= 1) thisPlayer += ",";
+        thisPlayer += gameData.players[i].id;
+      }
+    }
+  }
+  $("#player-num").html("Player: " + thisPlayer);
+}
 
 function sendHome(){
   window.location.href = window.location.origin;
@@ -42,14 +78,16 @@ function handleConnection(ids) {
   if(path.includes("host")){
     let setupID = {host: gameData.hostID, player: gameData.playerID};
     socket.emit("host_setup", setupID);
-    $("#lobby-num").html("Lobby id:  " + gameData.hostID);
+    //$.post(window.location.origin + "/host_setup", setupID);
+    if(debug) console.log(setupID);
+    $("#lobby-num").html("Lobby id: " + gameData.hostID);
   }
   else{
     let joinRequest = path.substring(path.lastIndexOf("/")+5,path.length); //+5 for "join" offset
     socket.emit("join_lobby", {join: joinRequest, player: gameData.playerID});
     if(debug) console.log(joinRequest);
     gameData.hostID = joinRequest;
-    $("#lobby-num").html("Lobby id:  " + gameData.hostID);
+    $("#lobby-num").html("Lobby id: " + gameData.hostID);
   }
 }
 
@@ -74,28 +112,35 @@ $(() => {
 
 //check where mouse click is on canvas (scaled for css size changes)
 canvas.addEventListener("mousedown", function (e) {
-  //check click position on canvas
-  let t = getMousePos(canvas, e);
-  //check if the client matches the current players turn, if so allow to play
+  let myTurn = false;
+  //check if the turn id matches with this players id
+  if(gameData.playerID === gameData.players[gameData.currentPlayerID-1].uuid){
+    myTurn = true;
+  }
+  if(myTurn){
+    //check click position on canvas
+    let t = getMousePos(canvas, e);
+    //validate move, update board array data and calc score
+    let s = boardClick(t, gameData.boardState, gameData.currentPlayerID, debug);
+    if(debug)console.log("click for: ");
+    if(debug)console.log(s);
+    gameData.players[gameData.currentPlayerID - 1].score += s.score;
 
-  //TODO
+    //move to next turn
+    if (s.updated) gameData.currentPlayerID++;
+    if (gameData.currentPlayerID > gameData.players.length) {
+      gameData.currentPlayerID = 1;
+    }
 
-  //validate move, update board array data and calc score
-  let s = boardClick(t, gameData.boardState, gameData.currentPlayerID, debug);
-  if(debug)console.log("click for: ");
-  if(debug)console.log(s);
-  gameData.players[gameData.currentPlayerID - 1].score += s.score;
-
-  //move to next turn
-  if (s.updated) gameData.currentPlayerID++;
-  if (gameData.currentPlayerID > gameData.players.length) {
-    gameData.currentPlayerID = 1;
+    //calls update functions through socket
+    if (s.updated) {
+      $.post(window.location.origin + "/update", gameData);
+    }
+  }
+  else{
+    if(debug) console.log("not your turn");
   }
 
-  //calls update functions through socket
-  if (s.updated) {
-    $.post(window.location.origin + "/update", gameData);
-  }
 });
 
 function remoteSetupGame(data) {

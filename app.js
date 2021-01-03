@@ -47,6 +47,11 @@ app.post("/join", function (req, res) {
 
 app.post("/setup", function (req, res) {
   io.to(req.body.hostID).emit("call_setup", req.body);
+  for(let i = 0; i < rooms.length; i++){
+    if(rooms[i].hostID === req.body.hostID){
+      io.to(req.body.hostID).emit("update_players", rooms[i].players);
+    }
+  }
   console.log(req.body);
   res.sendStatus(200);
 });
@@ -63,7 +68,7 @@ io.on("connection", (socket) => {
 
   //on connection give the user both a player id and host id
   let ids = {player: UUID.v4(), host: crypto.randomBytes(2).toString('hex')};
-  socket.emit("on_connect", {user: ids.player, host: ids.host});
+  socket.emit("on_connect", {player: ids.player, host: ids.host});
   console.log("assigned uuid: " + ids.player + " | game id: " + ids.host);
 
   //create a room on setup
@@ -87,6 +92,7 @@ io.on("connection", (socket) => {
         socket.join(id.join);
         rooms[i].players.push(id.player);
         console.log(rooms);
+        io.to(id.join).emit("player_joined", rooms[i].players.length);
         break;
       }
       else if( i === (rooms.length - 1)){
@@ -95,6 +101,14 @@ io.on("connection", (socket) => {
         io.to(id.join).emit("send_home");
       }
     }
+  
+    socket.on('disconnecting', () => {
+      console.log(socket.rooms); // the Set contains at least the socket ID
+      if(socket.rooms.size > 1){
+        let myArr = Array.from(socket.rooms)
+        io.to(myArr[1]).emit("player_left");
+      }
+    });
 
   });
 
