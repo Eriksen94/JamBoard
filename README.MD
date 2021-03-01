@@ -22,9 +22,7 @@ Design:
 
 Improvements:
 
-* numbers on board
-* fill in edges
+* numbers on board/show points on mouseover
 * highlight colours for player - score and top
-* randomize player order on start
-* show points on mouseover
-* desync breaks game - need rejoin or force update options
+* option to fill random blocked spots when setting up
+* improve UI, make turns, scoring, and colours clear

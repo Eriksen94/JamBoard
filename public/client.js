@@ -1,3 +1,6 @@
+/********************************************************************/
+/*************************client variables***************************/
+/********************************************************************/
 let debug = false;
 
 //script variables that display and govern game state
@@ -6,18 +9,19 @@ var context = canvas.getContext("2d");
 var gameData = {
   size: { rows: 5, cols: 5 },
   boardState: new Array(),
-  currentPlayerID: 1,
+  currentPlayersTurn: 1,
   players: new Array(),
   targetScore: 100,
-  lastMove: [0, 0],
   hostID: "",
   playerID: "",
   inLobby: 1,
+  suggestedScore: 100
 };
 
-function Player(uuid, id, colour, score) {
+//player object
+function Player(uuid, turnOrder, colour, score) {
   this.uuid = uuid;
-  this.id = id;
+  this.turnOrder = turnOrder;
   this.colour = colour;
   this.score = score;
 }
@@ -26,68 +30,60 @@ function Player(uuid, id, colour, score) {
 var socket = io();
 
 //socket based functions that the server will initiate
-socket.on("call_setup", remoteSetupGame);
-socket.on("call_update", remoteUpdateGame);
 socket.on("on_connect", handleConnection);
-socket.on("update_players", updatePlayers);
-socket.on("player_joined", playerJoined);
-socket.on("player_left", playerLeft);
+socket.on("update_room", updateGame);
 socket.on("send_home", sendHome);
 
 /********************************************************************/
 /*******************socket processing functions**********************/
 /********************************************************************/
-
-//perform same function as the setup button based on server socket pushing data
-//as well as updating input fields to match for consistency
-//params: data - matches gameData structure, which is passed from the originating client to server
-function remoteSetupGame(data) {
-  clearGameData();
-  gameData.size.rows = parseInt(data.size.rows);
-  gameData.size.cols = parseInt(data.size.cols);
-  for (let i = 0; i < data.players.length; i++) {
-    gameData.players.push(generatePlayers(i + 1));
-  }
-  gameData.targetScore = parseFloat(data.targetScore);
-  gameData.boardState = drawBoard(gameData.size);
-  $("#turnInd").html("Player 1 start");
-  $("#scoreDisplay").html("");
-
-  $("#rows").val(gameData.size.rows);
-  $("#cols").val(gameData.size.cols);
-  $("#playerCount").val(gameData.players.length);
-  $("#targetScore").val(gameData.targetScore);
-}
-
-//takes gameData passed from another client through the server and updates the display
-//show scores, fill in the grid, check for end game and winners
-//params: data matches the gameData structure as sent from the server via a client
-function remoteUpdateGame(data) {
+//receive game data from the server to update local gameData object
+//data: rows, cols, currentPlayersTurn, targetScore, boardState, players, complete, clientCount
+function updateGame(data) {
+  if (debug) console.log(data);
   //server converts numbers to strings, need to make sure data is stored properly
-  gameData.size = data.size;
+  gameData.inLobby = parseInt(data.clientCount);
+  cols = parseInt(data.cols);
+  rows = parseInt(data.rows);
+  gameData.currentPlayersTurn = parseInt(data.currentPlayersTurn);
+  gameData.targetScore = parseFloat(data.targetScore);
+  //re-draw board and set up array for copying
+  gameData.size.cols = cols;
+  gameData.size.rows = rows;
+  gameData.boardState.length = 0;
+  gameData.boardState = drawBoard(gameData.size);
+
+  //copy board state from the data to local storage
   for (let x = 0; x < gameData.boardState.length; x++) {
     for (let y = 0; y < gameData.boardState[0].length; y++) {
       gameData.boardState[x][y] = parseInt(data.boardState[x][y]);
     }
   }
-  gameData.currentPlayerID = parseInt(data.currentPlayerID);
-  for (let x = 0; x < gameData.players.length; x++) {
-    gameData.players[x].id = parseInt(data.players[x].id);
-    gameData.players[x].score = parseInt(data.players[x].score);
-  }
-  gameData.targetScore = parseFloat(data.targetScore);
 
-  displayScores(gameData.players, gameData.currentPlayerID, debug);
+  //copy player info
+  gameData.players.length = 0;
+  for (let x = 0; x < data.players.length; x++) {
+    let p = new Player(
+      data.players[x].uuid,
+      parseInt(data.players[x].turnOrder),
+      data.players[x].colour,
+      parseInt(data.players[x].score)
+    );
+    gameData.players.push(p);
+  }
 
   fillBoard(gameData.boardState, gameData.players, debug);
 
+  updateGameDisplay();
+
+  displayScores(gameData.players, gameData.currentPlayersTurn, debug);
+
   //check if the board is full - declare winner
-  displayWinner(
-    gameData.boardState,
-    gameData.players,
-    gameData.targetScore,
-    debug
-  );
+  if (checkComplete(gameData.boardState)) {
+    displayWinner(checkWinner(gameData.players, gameData.targetScore, debug), debug);
+  }
+
+  if(debug) console.log(gameData);
 }
 
 //check if a player is joining as host or to an existing lobby
@@ -100,12 +96,15 @@ function handleConnection(ids) {
 
   //url is lobby/host or lobby/join:gameID depending on previous selection
   let path = window.location.pathname;
+  //hosting
   if (path.includes("host")) {
     let setupID = { host: gameData.hostID, player: gameData.playerID };
     socket.emit("host_setup", setupID);
     if (debug) console.log(setupID);
     $("#lobby-num").html("Lobby id: " + gameData.hostID);
-  } else {
+  }
+  //joining
+  else {
     let joinRequest = path.substring(path.lastIndexOf("/") + 5, path.length); //+5 for "join" offset
     socket.emit("join_lobby", { join: joinRequest, player: gameData.playerID });
     if (debug) console.log(joinRequest);
@@ -114,46 +113,7 @@ function handleConnection(ids) {
   }
 }
 
-//assign uuids to the local game data player objects and relate to local ids for turn order
-//can only called after remote/local setup functions to populate the gameData.players array
-//params: idArr[] - an array of UUIDs for the room that this socket is connected to
-//account for players in lobby being either more of less than players in the game
-//for more in lobby - assign in order of joining
-//for more in game - repeat assigns
-function updatePlayers(idArr) {
-  if (debug) console.log(idArr);
-  gameData.inLobby = idArr.length;
-  let thisPlayer = "";
-  if (gameData.players.length > 0) {
-    //account for players in lobby being either more of less than players in the game
-    let k = 0;
-    for (let i = 0; i < gameData.players.length; i++) {
-      gameData.players[i].uuid = idArr[k];
-      k++;
-      if (k >= idArr.length) k = 0;
-      //the uuid matches this clients ID so assign player
-      if (gameData.players[i].uuid === gameData.playerID) {
-        if (thisPlayer.length >= 1) thisPlayer += ",";
-        thisPlayer += gameData.players[i].id;
-      }
-    }
-  }
-  $("#player-num").html("Player: " + thisPlayer);
-}
-
-//set the current player count to the value sent from the server
-function playerJoined(count) {
-  gameData.inLobby = count;
-  $("#player-count").html(gameData.inLobby + " players in lobby");
-}
-
-//decrement the current player count when a socket disconnects
-function playerLeft() {
-  gameData.inLobby--;
-  $("#player-count").html(gameData.inLobby + " players in lobby");
-}
-
-//send to homepage
+//send to homepage when attempting to join a host that doesn't exist
 function sendHome() {
   window.location.href = window.location.origin;
 }
@@ -166,20 +126,28 @@ function sendHome() {
 //setup the canvas for play, based on the input boxes
 $(() => {
   $("#setup-btn").click(function () {
-    //clear any existing game data
+    //clear any existing game data and update display for immediate feedback
     clearGameData();
     gameData.size.rows = $("#rows").val();
     gameData.size.cols = $("#cols").val();
-    for (let i = 0; i < $("#playerCount").val(); i++) {
-      gameData.players.push(generatePlayers(i + 1));
+    let playerCount = $("#playerCount").val();
+    for (let i = 0; i < playerCount; i++) {
+      gameData.players.push(new Player("", i+1,"",0));
     }
     gameData.targetScore = $("#targetScore").val();
     gameData.boardState = drawBoard(gameData.size);
     $("#turnInd").html("Player 1 start");
     $("#scoreDisplay").html("");
-    //post to the server so that it can re-emit to all the other sockets in the same room and update them as well
-    //client side sockets don't have rooms
-    $.post(window.location.origin + "/setup", gameData);
+
+    //emit to the server so that it can re-emit to all the other sockets in the same room and update them as well
+    let setupData = {
+      host: gameData.hostID,
+      rows: gameData.size.rows,
+      cols: gameData.size.cols,
+      playerCount: playerCount,
+      targetScore: gameData.targetScore,
+    };
+    socket.emit("game_setup", setupData);
   });
 });
 
@@ -189,31 +157,45 @@ $(() => {
 canvas.addEventListener("mousedown", function (e) {
   let myTurn = false;
   //check if the turn id matches with this players id
-  if (
-    gameData.playerID === gameData.players[gameData.currentPlayerID - 1].uuid
-  ) {
-    myTurn = true;
+  for (let i = 0; i < gameData.players.length; i++) {
+    if (
+      gameData.currentPlayersTurn === gameData.players[i].turnOrder &&
+      gameData.playerID === gameData.players[i].uuid
+    ) {
+      myTurn = true;
+    }
   }
+
   if (myTurn) {
     //check click position on canvas
     let t = getMousePos(canvas, e);
-    //validate move, update board array data and calc score
-    let s = boardClick(t, gameData.boardState, gameData.currentPlayerID, debug);
+    //validate move, update board array data and calc score locally for responsiveness
+    let s = boardClick(
+      t,
+      gameData.boardState,
+      gameData.currentPlayersTurn,
+      debug
+    );
     if (debug) console.log("click for: ");
     if (debug) console.log(s);
-    gameData.players[gameData.currentPlayerID - 1].score += s.score;
+    gameData.players[gameData.currentPlayersTurn - 1].score += s.score;
 
     //move to next turn
-    if (s.updated) gameData.currentPlayerID++;
-    if (gameData.currentPlayerID > gameData.players.length) {
-      gameData.currentPlayerID = 1;
+    if (s.updated) gameData.currentPlayersTurn++;
+    if (gameData.currentPlayersTurn > gameData.players.length) {
+      gameData.currentPlayersTurn = 1;
     }
 
     //calls update functions through socket
-    //post to the server so that it can re-emit to all sockets in this room and update them as well (including this one)
+    //emit to the server so that it can re-emit to all sockets in this room and update them as well (including this one)
     //client side sockets don't have rooms
     if (s.updated) {
-      $.post(window.location.origin + "/update", gameData);
+      let moveData = {
+        host: gameData.hostID,
+        row: s.row,
+        col: s.col,
+      };
+      socket.emit("move_played", moveData);
     }
   } else {
     if (debug) console.log("not your turn");
@@ -232,6 +214,23 @@ function getMousePos(canvas, evt, verbose = false) {
   };
   if (verbose) console.log(coord.x + "," + coord.y);
   return coord;
+}
+
+$("#rows").change(() => {estimateTarget()});
+$("#cols").change(() => {estimateTarget()});
+$("#playerCount").change(() => {estimateTarget()});
+
+function estimateTarget(){
+  const r = $("#rows").val();
+  const c = $("#cols").val();
+  const p = $("#playerCount").val();
+  let sum = 0;
+  for(let i = 1; i <= r; i++){
+    for(let j = 1; j <= c; j++){
+      sum += i*j;
+    }
+  }
+  $("#targetScore").val(Math.round(sum/p * 10) / 10);
 }
 
 /********************************************************************/
@@ -271,7 +270,6 @@ function drawBoard(size, verbose = false) {
   for (let i = 0; i < size.rows; i++) {
     let a = new Array(size.cols);
     for (let j = 0; j < size.cols; ++j) a[j] = 0;
-    let tempRow = new Array(size.cols).fill(0);
     if (verbose) console.log(a);
     tempBoard.push(a);
   }
@@ -294,7 +292,7 @@ function fillBoard(boardState, playersArr, verbose = false) {
     for (let j = 0; j < boardState[0].length; j++) {
       if (boardState[x][j] > 0) {
         for (let k = 0; k < playersArr.length; k++) {
-          if (boardState[x][j] === playersArr[k].id) {
+          if (boardState[x][j] === playersArr[k].turnOrder) {
             context.fillStyle = playersArr[k].colour;
             break;
           }
@@ -304,14 +302,24 @@ function fillBoard(boardState, playersArr, verbose = false) {
         let yStart = rowHt * x;
         let adjust = [1, 1, -2, -2]; //2px grid lines
         if (x === 0) {
-          //first row
+          //first row - no top line offset, start pos up 1px, ht inc 1px
           adjust[1] = 0;
           adjust[3] = -1;
         }
         if (j === 0) {
-          //first col
+          //first col - no left line, start pos left 1px, wd inc 1px
           adjust[0] = 0;
           adjust[2] = -1;
+        }
+        if (x === boardState.length-1){
+          //last row - inc row ht to fill edge
+          const htRemainder = ht % rowHt;
+          adjust[3] = htRemainder - 1;
+        }
+        if (j === boardState[0].length-1){
+          //last column - inc col wd to fill edge
+          const colRemainder = wd % colWd;
+          adjust[2] = colRemainder - 1;
         }
         context.fillRect(
           xStart + adjust[0],
@@ -331,7 +339,7 @@ function fillBoard(boardState, playersArr, verbose = false) {
 
 //check which grid space a click on the canvas occurred in
 //if the space is available update the board state for the player
-//return: score of the move, if a move was accepted {score: , updated: }
+//return: score of the move, if a move was accepted, and the row/col index of the move {score: , updated: , row: , col:}
 //update script scope board state - draw updated board elsewhere
 //Params: clickPos = {x: , y: } scaled position of the cursor when pressed down on canvas element, calculated in event listener
 //boardState[rows][cols] - array of board state 0 or player id
@@ -378,7 +386,7 @@ function boardClick(clickPos, boardState, playerID, verbose = false) {
   if (update) {
     moveScore = scoreMove(playerID, move, boardState, verbose);
   }
-  return { score: moveScore, updated: update };
+  return { score: moveScore, updated: update, row: move.row, col: move.col };
 }
 
 //score move by checking surrounding board state - vertical add, horizontal subtract
@@ -484,13 +492,84 @@ function scoreMove(playerID, move, board, verbose = false) {
   return addToScore;
 }
 
+//check if the board is completely filled with non zero elements
+//return true if so, thus the game is complete
+function checkComplete(boardState, verbose = false) {
+  if (verbose) console.log(boardState);
+  let emptyCount = 0;
+  for (let i = 0; i < boardState.length; i++) {
+    for (let j = 0; j < boardState[0].length; j++) {
+      if (verbose) console.log(boardState[i][j]);
+      if (boardState[i][j] == 0) {
+        emptyCount++;
+      }
+    }
+  }
+  return emptyCount === 0 ? true : false;
+}
+
+//perform the score calculations given the list of player data and target
+//return if it was a tie, the turn number of the winning player, and the second place score
+//{tied: , winner: , closestScore: }
+function checkWinner(playerArr, targetScore, verbose = false) {
+  if (verbose) console.log(playerArr);
+  const scoreDeltas = new Array();
+  scoreDeltas.push(Math.abs(playerArr[0].score - targetScore));
+  let tie = false;
+  //find first place
+  for (let i = 1; i < playerArr.length; i++) {
+    scoreDeltas.push(Math.abs(playerArr[i].score - targetScore));
+  }
+
+  if (verbose) console.log(scoreDeltas);
+
+  const winningScore = Math.min(...scoreDeltas)
+  const winningIndex = scoreDeltas.indexOf(winningScore);
+  let tieIndex = 0;
+  if (verbose) console.log("with" + winningScore + ", winnner:" + winningIndex);
+
+  //check winning index found
+  if (winningIndex > -1) {
+    //check if another index of the same scoreDelta exists
+    tieIndex = scoreDeltas.indexOf(winningScore, winningIndex+1);
+    if(tieIndex > -1){
+      //tie matched
+      tie = true;
+      if (verbose) console.log("tie: " + tie);
+    }
+    else{
+      tieIndex = 0;
+    }
+  }
+
+  return {
+    isTie: tie,
+    winner: playerArr[winningIndex].turnOrder,
+    tier: playerArr[tieIndex].turnOrder,
+  };
+}
+
+/********************************************************************/
+/*******************HTML display update functions********************/
+/********************************************************************/
+
+//update non-score related HTML for display consistency
+function updateGameDisplay() {
+  $("#player-count").html(gameData.inLobby + " players in lobby");
+  $("#rows").val(gameData.size.rows);
+  $("#cols").val(gameData.size.cols);
+  $("#playerCount").val(gameData.players.length);
+  $("#targetScore").val(gameData.targetScore);
+}
+
 //update HTML to display scores
 //params: players - array of player objects, playerID - current players turn
 function displayScores(players, playerID) {
   let turnStr = "Player " + playerID + "'s turn ";
   let scoreStr = "";
   for (let i = 0; i < players.length; i++) {
-    let str = "Player " + players[i].id + " score: " + players[i].score + " | ";
+    let str =
+      "Player " + players[i].turnOrder + " score: " + players[i].score + " | ";
     scoreStr += str;
   }
   $("#scoreDisplay").html(scoreStr);
@@ -503,88 +582,27 @@ function displayScores(players, playerID) {
 //boardState[rows][cols] - array of board state 0 or player id
 //players - array of player objects with IDs and scores
 //targetScore - value that scores will be assessed against
-function displayWinner(boardState, players, targetScore, verbose = false) {
-  if (verbose) console.log(boardState);
-  let emptyCount = 0;
-  for (let i = 0; i < boardState.length; i++) {
-    for (let j = 0; j < boardState[0].length; j++) {
-      console.log(boardState[i][j]);
-      if (boardState[i][j] == 0) {
-        emptyCount++;
-      }
-    }
+function displayWinner(winner, verbose = false) {
+  if (verbose) console.log(winner);
+  let turnStr = "";
+  if (winner.isTie) {
+    turnStr += "Tie for first between player " + winner.winner + " and " + winner.tier;
+  } else {
+    turnStr += "Player " + winner.winner + " wins!";
   }
-  if (emptyCount === 0) {
-    if (verbose) console.log("no empty spaces found");
-    let winner = checkWinner(players, targetScore, verbose);
-    if (debug) console.log(winner);
-    if (debug) console.log(players);
-    let turnStr = "";
-    if (winner.tied) {
-      turnStr += "Tie for first with " + winner.closestScore + " points!";
-    } else {
-      turnStr += "Player " + winner.winner + " wins!";
-    }
-    $("#turnInd").html(turnStr);
-  }
-}
-
-//part of display winner - when a complete board is found, perform the score calculations
-function checkWinner(playerArr, targetScore, verbose = false) {
-  if (verbose) console.log(playerArr);
-  if (verbose) console.log(targetScore);
-  let winnerLocalID = 1;
-  let smallestDelta = Math.abs(playerArr[0].score - targetScore);
-  let tie = false;
-  if (verbose)
-    console.log("delta: " + smallestDelta + ", id: " + winnerLocalID);
-  for (let i = 1; i < playerArr.length; i++) {
-    let tempDelta = Math.abs(playerArr[i].score - targetScore);
-    if (tempDelta < smallestDelta) {
-      smallestDelta = tempDelta;
-      winnerLocalID = i + 1;
-      tie = false;
-    } else if (tempDelta === smallestDelta) {
-      tie = true;
-    }
-    if (verbose) console.log("delta: " + tempDelta + ", id: " + (i + 1));
-  }
-  return {
-    tied: tie,
-    winner: winnerLocalID,
-    closestScore: playerArr[winnerLocalID - 1].score,
-  };
+  $("#turnInd").html(turnStr);
 }
 
 /********************************************************************/
 /***********************convenience functions************************/
 /********************************************************************/
 
-//convenience function to create player object templates with a set colour
-//only 10 colours are setup for up to 10 players - doesn't support beyond that
-//params: localID is the player/turn number that is assigned to the object
-function generatePlayers(localID) {
-  let colours = [
-    "#F30E0E",
-    "#f3db0e",
-    "#88F30E",
-    "#0EF395",
-    "#0E84F3",
-    "#C80EF3",
-    "#F30E94",
-    "#0E1D45",
-    "#7CAC88",
-    "#FFFFFF",
-  ];
-  return new Player("", localID, colours[localID - 1], 0);
-}
-
 //reset the script level gameData object to a default state
 //only changes game variables for clearing games - not network parameters like ID that are assigned on connection
 function clearGameData() {
   gameData.size = { rows: 5, cols: 5 };
   gameData.boardState.length = 0;
-  gameData.currentPlayerID = 1;
+  gameData.currentPlayersTurn = 1;
   gameData.players.length = 0;
   gameData.targetScore = 100;
 }
