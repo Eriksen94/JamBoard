@@ -5,7 +5,7 @@ let debug = false;
 
 //script variables that display and govern game state
 var canvas = document.getElementById("viewport");
-var context = canvas.getContext("2d");
+var canvasCtx = canvas.getContext("2d");
 var gameData = {
   size: { rows: 5, cols: 5 },
   boardState: new Array(),
@@ -72,11 +72,11 @@ function updateGame(data) {
     gameData.players.push(p);
   }
 
-  fillBoard(gameData.boardState, gameData.players, debug);
+  fillBoard(gameData.currentPlayersTurn, gameData.boardState, gameData.players, debug);
 
   updateGameDisplay();
 
-  displayScores(gameData.players, gameData.currentPlayersTurn, debug);
+  displayScores(gameData.players);
 
   //check if the board is full - declare winner
   if (checkComplete(gameData.boardState)) {
@@ -220,6 +220,7 @@ $("#rows").change(() => {estimateTarget()});
 $("#cols").change(() => {estimateTarget()});
 $("#playerCount").change(() => {estimateTarget()});
 
+//provide a score target estimate - sum of all possible moves / num of players
 function estimateTarget(){
   const r = $("#rows").val();
   const c = $("#cols").val();
@@ -240,10 +241,10 @@ function estimateTarget(){
 //draw grid lines on the canvas
 //return array of 0s for the size passed in
 //params: size {rows: ..., cols: ...}
-//canvas context is script scoped
+//canvasCtx is script scoped
 function drawBoard(size, verbose = false) {
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.beginPath();
+  canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+  canvasCtx.beginPath();
   let ht = canvas.height;
   let wd = canvas.width;
 
@@ -251,20 +252,20 @@ function drawBoard(size, verbose = false) {
   let colWd = Math.floor(wd / size.cols);
 
   for (let x = rowHt; x < ht - rowHt + 1; x += rowHt) {
-    context.moveTo(0, x);
-    context.lineTo(wd, x);
+    canvasCtx.moveTo(0, x);
+    canvasCtx.lineTo(wd, x);
     if (verbose) console.log("line: 0," + x + " to " + wd + "," + x);
   }
 
   for (let x = colWd; x < wd - colWd + 1; x += colWd) {
-    context.moveTo(x, 0);
-    context.lineTo(x, ht);
+    canvasCtx.moveTo(x, 0);
+    canvasCtx.lineTo(x, ht);
     if (verbose) console.log("line: " + x + ",0 to " + x + "," + ht);
   }
 
-  context.strokeStyle = "#FFFFFF";
-  context.lineWidth = 2;
-  context.stroke();
+  canvasCtx.strokeStyle = "#FFFFFF";
+  canvasCtx.lineWidth = 2;
+  canvasCtx.stroke();
 
   let tempBoard = new Array();
   for (let i = 0; i < size.rows; i++) {
@@ -280,7 +281,7 @@ function drawBoard(size, verbose = false) {
 //colour in boxes on the canvas based on the array indicating board state
 //params: boardState[rows][cols] - 0 = blank, otherwise filled with player id
 //playersArr[] {uuid: , id: , colour} - match id and colour for fill colour
-function fillBoard(boardState, playersArr, verbose = false) {
+function fillBoard(currentTurn, boardState, playersArr, verbose = false) {
   //board state - 2d array of rows and cols indicating filled or blank
   let ht = canvas.height;
   let wd = canvas.width;
@@ -290,10 +291,11 @@ function fillBoard(boardState, playersArr, verbose = false) {
 
   for (let x = 0; x < boardState.length; x++) {
     for (let j = 0; j < boardState[0].length; j++) {
+      //space has been played on - colour code it
       if (boardState[x][j] > 0) {
         for (let k = 0; k < playersArr.length; k++) {
           if (boardState[x][j] === playersArr[k].turnOrder) {
-            context.fillStyle = playersArr[k].colour;
+            canvasCtx.fillStyle = playersArr[k].colour;
             break;
           }
         }
@@ -321,7 +323,7 @@ function fillBoard(boardState, playersArr, verbose = false) {
           const colRemainder = wd % colWd;
           adjust[2] = colRemainder - 1;
         }
-        context.fillRect(
+        canvasCtx.fillRect(
           xStart + adjust[0],
           yStart + adjust[1],
           colWd + adjust[2],
@@ -333,6 +335,15 @@ function fillBoard(boardState, playersArr, verbose = false) {
             "ret: " + xStart + "," + yStart + "," + colWd + "," + rowHt
           );
       }
+      //space is empty - write in the potential value for the current players turn
+      else{
+        scorePot = scoreMove(currentTurn, {row: x, col: j}, boardState);
+        let xStart = colWd * j;
+        let yStart = rowHt * x;
+        canvasCtx.fillStyle = "#FFF";
+        let potStr = "" + scorePot;
+        canvasCtx.fillText(potStr, xStart + 5, yStart + 10);
+      }
     }
   }
 }
@@ -343,7 +354,7 @@ function fillBoard(boardState, playersArr, verbose = false) {
 //update script scope board state - draw updated board elsewhere
 //Params: clickPos = {x: , y: } scaled position of the cursor when pressed down on canvas element, calculated in event listener
 //boardState[rows][cols] - array of board state 0 or player id
-//playerID - id for the player that made the click - enforce turn requirements elsewhere
+//playerID - turn number for the player that made the click - enforce turn requirements elsewhere
 function boardClick(clickPos, boardState, playerID, verbose = false) {
   if (verbose) console.log(boardState);
   //check which grid location the mouse press occurred
@@ -555,25 +566,57 @@ function checkWinner(playerArr, targetScore, verbose = false) {
 
 //update non-score related HTML for display consistency
 function updateGameDisplay() {
-  $("#player-count").html(gameData.inLobby + " players in lobby");
+  let playerStr = gameData.inLobby + " player(s) in lobby";
+  if(gameData.players.length > 1){
+    playerStr += " you are playing: ";
+    let playingAs = new Array();
+    for(let i = 0; i < gameData.players.length; i++){
+      if(gameData.playerID === gameData.players[i].uuid){
+        playingAs.push(gameData.players[i].turnOrder);
+      }
+    }
+    if(playingAs.length > 0){
+      playingAs.sort();
+      for(let i = 0; i < playingAs.length; i++){
+        playerStr += "player " + playingAs[i];
+        if(i != playingAs.length-1){
+          playerStr += " & ";
+        }
+      }
+    }
+    else{
+      playerStr = gameData.inLobby + " player(s) in lobby, you are observing";
+    }
+  }
+  $("#player-count").html(playerStr);
   $("#rows").val(gameData.size.rows);
   $("#cols").val(gameData.size.cols);
   $("#playerCount").val(gameData.players.length);
   $("#targetScore").val(gameData.targetScore);
+  $("#player-num").html("Player " + gameData.currentPlayersTurn + "s turn!");
 }
 
 //update HTML to display scores
 //params: players - array of player objects, playerID - current players turn
-function displayScores(players, playerID) {
-  let turnStr = "Player " + playerID + "'s turn ";
+function displayScores(players) {
   let scoreStr = "";
+  let str = "";
+  console.log(players);
   for (let i = 0; i < players.length; i++) {
-    let str =
-      "Player " + players[i].turnOrder + " score: " + players[i].score + " | ";
-    scoreStr += str;
+    for(let j = 0; j < players.length; j++){
+      console.log("i: " + i + ", to: " + players[j].turnOrder);
+      if(players[j].turnOrder === i+1){
+        str += "Player " + players[j].turnOrder + " score: " + players[j].score;
+        if(i != players.length - 1){
+          str += " | ";
+        }
+        console.log(str);
+        break;
+      }
+    }
   }
+  scoreStr += str;
   $("#scoreDisplay").html(scoreStr);
-  $("#turnInd").html(turnStr);
 }
 
 //check if the board has any empty spaces, if not check scores against the target and determine closest player
@@ -584,13 +627,13 @@ function displayScores(players, playerID) {
 //targetScore - value that scores will be assessed against
 function displayWinner(winner, verbose = false) {
   if (verbose) console.log(winner);
-  let turnStr = "";
+  let winStr = "";
   if (winner.isTie) {
-    turnStr += "Tie for first between player " + winner.winner + " and " + winner.tier;
+    winStr += "Tie for first between player " + winner.winner + " and " + winner.tier;
   } else {
-    turnStr += "Player " + winner.winner + " wins!";
+    winStr += "Player " + winner.winner + " wins!";
   }
-  $("#turnInd").html(turnStr);
+  $("#player-num").html(winStr);
 }
 
 /********************************************************************/
