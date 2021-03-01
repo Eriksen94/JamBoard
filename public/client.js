@@ -6,6 +6,11 @@ let debug = false;
 //script variables that display and govern game state
 var canvas = document.getElementById("viewport");
 var canvasCtx = canvas.getContext("2d");
+canvas.width=1000;//horizontal resolution (?) - increase for better looking text
+canvas.height=500;//vertical resolution (?) - increase for better looking text
+canvas.style.width=500;//actual width of canvas
+canvas.style.height=500;//actual height of canvas
+
 var gameData = {
   size: { rows: 5, cols: 5 },
   boardState: new Array(),
@@ -342,7 +347,8 @@ function fillBoard(currentTurn, boardState, playersArr, verbose = false) {
         let yStart = rowHt * x;
         canvasCtx.fillStyle = "#FFF";
         let potStr = "" + scorePot;
-        canvasCtx.fillText(potStr, xStart + 5, yStart + 10);
+        canvasCtx.font = "80px Georgia";
+        canvasCtx.fillText(potStr, xStart + 120, yStart + 110);
       }
     }
   }
@@ -568,7 +574,7 @@ function checkWinner(playerArr, targetScore, verbose = false) {
 function updateGameDisplay() {
   let playerStr = gameData.inLobby + " player(s) in lobby";
   if(gameData.players.length > 1){
-    playerStr += " you are playing: ";
+    playerStr += " you are playing as: ";
     let playingAs = new Array();
     for(let i = 0; i < gameData.players.length; i++){
       if(gameData.playerID === gameData.players[i].uuid){
@@ -578,7 +584,8 @@ function updateGameDisplay() {
     if(playingAs.length > 0){
       playingAs.sort();
       for(let i = 0; i < playingAs.length; i++){
-        playerStr += "player " + playingAs[i];
+        const pl = getPlayerFromTurn(playingAs[i], gameData.players);
+        playerStr += '<span style="color: ' + pl.colour + '">player ' + playingAs[i] + "</span>";
         if(i != playingAs.length-1){
           playerStr += " & ";
         }
@@ -593,7 +600,8 @@ function updateGameDisplay() {
   $("#cols").val(gameData.size.cols);
   $("#playerCount").val(gameData.players.length);
   $("#targetScore").val(gameData.targetScore);
-  $("#player-num").html("Player " + gameData.currentPlayersTurn + "s turn!");
+  const pl = getPlayerFromTurn(gameData.currentPlayersTurn, gameData.players);
+  $("#player-num").html('<span style="color: ' + pl.colour + '">Player ' + pl.turnOrder + 's </span>turn!');
 }
 
 //update HTML to display scores
@@ -601,16 +609,16 @@ function updateGameDisplay() {
 function displayScores(players) {
   let scoreStr = "";
   let str = "";
-  console.log(players);
+  if(debug) console.log(players);
   for (let i = 0; i < players.length; i++) {
     for(let j = 0; j < players.length; j++){
-      console.log("i: " + i + ", to: " + players[j].turnOrder);
+      if(debug) console.log("i: " + i + ", to: " + players[j].turnOrder);
       if(players[j].turnOrder === i+1){
-        str += "Player " + players[j].turnOrder + " score: " + players[j].score;
+        str += '<span style="color: ' + players[j].colour + '">Player ' + players[j].turnOrder + 's </span> score: ' + players[j].score;
         if(i != players.length - 1){
           str += " | ";
         }
-        console.log(str);
+        if(debug) console.log(str);
         break;
       }
     }
@@ -628,10 +636,12 @@ function displayScores(players) {
 function displayWinner(winner, verbose = false) {
   if (verbose) console.log(winner);
   let winStr = "";
+  const pl = getPlayerFromTurn(winner.winner, gameData.players);
+  const plT = getPlayerFromTurn(winner.tier, gameData.players);
   if (winner.isTie) {
-    winStr += "Tie for first between player " + winner.winner + " and " + winner.tier;
+    winStr += "Tie between player " + '<span style="color: ' + pl.colour + '">' + pl.turnOrder + '</span>' + " and " + '<span style="color: ' + plT.colour + '">' + plT.turnOrder + '</span>';
   } else {
-    winStr += "Player " + winner.winner + " wins!";
+    winStr += '<span style="color: ' + pl.colour + '">Player ' + pl.turnOrder + ' </span>wins!';
   }
   $("#player-num").html(winStr);
 }
@@ -648,4 +658,13 @@ function clearGameData() {
   gameData.currentPlayersTurn = 1;
   gameData.players.length = 0;
   gameData.targetScore = 100;
+}
+
+//find the player data that has the turn passed in
+function getPlayerFromTurn(turn, players){
+  for(let i = 0; i < players.length; i++){
+    if(turn === players[i].turnOrder){
+      return players[i];
+    }
+  }
 }

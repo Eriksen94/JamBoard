@@ -22,6 +22,4 @@ Design:
 
 Improvements:
 
-* highlight colours for player - score and top
 * option to fill random blocked spots when setting up
-* improve UI, make turns, scoring, and colours clear

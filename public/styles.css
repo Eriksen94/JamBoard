@@ -10,9 +10,12 @@ p {
 	color: #FFF;
 }
 
+h1 {
+	font-size: 6rem;
+}
+
 input {
 	text-align: center;
-	margin: 5px;
 }
 
 #viewport {
@@ -25,3 +28,25 @@ input {
     text-align: center;
 }
 
+.vertical-center {
+	min-height: 100%;  /* Fallback for browsers do NOT support vh unit */
+	min-height: 100vh; /* These two lines are counted as one :-)       */
+  
+	display: flex;
+	align-items: center;
+}
+
+#game_id {
+	width: 33%;
+	margin: auto;
+}
+
+#join-btn {
+	margin: 0.5rem;
+}
+
+@media (max-width: 575.98px) { 
+	.input-group-text {
+		width: 150px;
+	}
+ }
