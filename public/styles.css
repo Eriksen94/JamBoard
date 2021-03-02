@@ -47,6 +47,6 @@ input {
 
 @media (max-width: 575.98px) { 
 	.input-group-text {
-		width: 150px;
+		width: 110px;
 	}
  }
