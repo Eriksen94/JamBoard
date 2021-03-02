@@ -343,12 +343,14 @@ function fillBoard(currentTurn, boardState, playersArr, verbose = false) {
       //space is empty - write in the potential value for the current players turn
       else{
         scorePot = scoreMove(currentTurn, {row: x, col: j}, boardState);
-        let xStart = colWd * j;
-        let yStart = rowHt * x;
+        const xStart = colWd * j;
+        const xOffset = colWd/2 - 15;
+        const yStart = rowHt * x;
+        const yOffset = rowHt/2 + 10; 
         canvasCtx.fillStyle = "#FFF";
         let potStr = "" + scorePot;
-        canvasCtx.font = "80px Georgia";
-        canvasCtx.fillText(potStr, xStart + 120, yStart + 110);
+        canvasCtx.font = "30px Georgia";
+        canvasCtx.fillText(potStr, xStart + xOffset, yStart + yOffset);
       }
     }
   }
