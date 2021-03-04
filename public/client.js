@@ -1,17 +1,17 @@
 /********************************************************************/
 /*************************client variables***************************/
 /********************************************************************/
-let debug = false;
+let debug = true;
 
 //script variables that display and govern game state
-var canvas = document.getElementById("viewport");
-var canvasCtx = canvas.getContext("2d");
+let canvas = document.getElementById("viewport");
+let canvasCtx = canvas.getContext("2d");
 canvas.width=1000;//horizontal resolution (?) - increase for better looking text
 canvas.height=500;//vertical resolution (?) - increase for better looking text
 canvas.style.width=500;//actual width of canvas
 canvas.style.height=500;//actual height of canvas
 
-var gameData = {
+let gameData = {
   size: { rows: 5, cols: 5 },
   boardState: new Array(),
   currentPlayersTurn: 1,
@@ -20,7 +20,8 @@ var gameData = {
   hostID: "",
   playerID: "",
   inLobby: 1,
-  suggestedScore: 100
+  suggestedScore: 100,
+  stage: "setup"
 };
 
 //player object
@@ -31,19 +32,129 @@ function Player(uuid, turnOrder, colour, score) {
   this.score = score;
 }
 
+let colours = {
+  list: new Array(),
+  xCenter: new Array(),
+  yCenter: new Array(),
+  radius: 50,
+  rows: 2,
+  available: new Array(),
+  selectedInd: -1
+};
+
 //connect to socket IO instance on the server - socket IO script files must be loaded in HTML as well
 var socket = io();
 
 //socket based functions that the server will initiate
 socket.on("on_connect", handleConnection);
+socket.on("start_setup", startColourSelection);
+socket.on("update_colours", updateColours);
 socket.on("update_room", updateGame);
 socket.on("send_home", sendHome);
 
 /********************************************************************/
 /*******************socket processing functions**********************/
 /********************************************************************/
+
+//clear the board and initialize game parameters - update display/canvas for
+//player colour selection and update global colours object for colours, positioning and availability
+//Params: game object, colours array (hex codes of possible colour choices)
+function startColourSelection(setupParams){
+  clearGameData();
+  //copy player list
+  copyPlayersToGameData(setupParams.game.players);
+  //copy game parameters
+  gameData.inLobby = parseInt(setupParams.game.clientCount);
+  gameData.size.cols = parseInt(setupParams.game.cols);
+  gameData.size.rows = parseInt(setupParams.game.rows);
+  gameData.targetScore = parseFloat(setupParams.game.targetScore);
+  gameData.stage = setupParams.game.stage;
+
+  const infoStr = "Select a colour";
+
+  //copy colours
+  colours.list.length = 0;
+  for(let i = 0; i < setupParams.colours.length; i++){
+    colours.list.push(setupParams.colours[i]);
+  }
+
+  //update canvas with coloured circles to be used for colour selecting
+  let ht = canvas.height;
+  let wd = canvas.width;
+  //insert info title
+  const xText = wd/2 - (7*15);
+  const yText = ht/10 - 15;
+  canvasCtx.fillStyle = "#FFF";
+  canvasCtx.font = "30px Georgia";
+  canvasCtx.fillText(infoStr, xText, yText);
+
+  //insert coloured circles and save positions to cross reference click positions
+  const cCols = Math.ceil(colours.list.length/colours.rows);
+  let c = 0;
+  colours.xCenter.length = 0;
+  colours.yCenter.length = 0;
+  colours.available.length = 0;
+  for(let i = 0; i < colours.rows; i++){
+    for(let j = 0; j < cCols; j++){
+      const xStart = wd/(cCols+1) * (j+1);
+      const yStart = (ht - yText)/(colours.rows+1) * (i+1);
+      if(c < colours.list.length){
+        colours.xCenter.push(xStart);
+        colours.yCenter.push(yStart);
+        drawColour(c);
+        c++;
+      }
+    }
+  }
+
+  //update other display elements for context
+  updateGameDisplay();
+  displayScores(gameData.players);
+  //overwrite default player turn indication
+  $("#player-num").html('Finish selecting colours to start');
+}
+
+//Params: players: updated array of player objects, containing assigned colours 
+//availableColours: array of hex codes for colours yet to be picked
+//clientCount: players in lobby for display update, stage: indicate if game is in "setup" or "playing"
+function updateColours(data){
+  console.log(data.availableColours);
+  copyPlayersToGameData(data.players);
+  gameData.stage = data.stage;
+  colours.available.length = 0;
+  for(let i = 0; i < data.availableColours.length; i++){
+    colours.available.push(data.availableColours[i]);
+  }
+  //draw all available colours and remove non-available colours
+  for(let i = 0; i < colours.list.length; i++){
+    for(let j = 0; j < colours.available.length; j++){
+      if(colours.list[i] === colours.available[j]){
+        drawColour(i);
+        break;
+      }
+      else if(j === colours.available.length-1){
+        clearColourFromCanvas(i);
+      }
+    }
+  }
+
+  gameData.inLobby = parseInt(data.clientCount);
+  //update other display elements for context
+  updateGameDisplay();
+  displayScores(gameData.players);
+  //overwrite default player turn indication
+  $("#player-num").html('Finish selecting colours to start');
+
+  //check for all colours assigned
+  let assignments = colours.list.length - colours.available.length;
+  if(assignments >= gameData.players.length && gameData.players.length != 0){
+    gameData.stage = "playing";
+    socket.emit("game_started", {host: gameData.hostID});
+  }
+}
+
 //receive game data from the server to update local gameData object
-//data: rows, cols, currentPlayersTurn, targetScore, boardState, players, complete, clientCount
+//data: rows, cols, currentPlayersTurn, targetScore, boardState, players, complete, clientCount, stage
 function updateGame(data) {
   if (debug) console.log(data);
   //server converts numbers to strings, need to make sure data is stored properly
@@ -52,6 +163,7 @@ function updateGame(data) {
   rows = parseInt(data.rows);
   gameData.currentPlayersTurn = parseInt(data.currentPlayersTurn);
   gameData.targetScore = parseFloat(data.targetScore);
+  gameData.stage = data.stage;
   //re-draw board and set up array for copying
   gameData.size.cols = cols;
   gameData.size.rows = rows;
@@ -66,16 +178,7 @@ function updateGame(data) {
   }
 
   //copy player info
-  gameData.players.length = 0;
-  for (let x = 0; x < data.players.length; x++) {
-    let p = new Player(
-      data.players[x].uuid,
-      parseInt(data.players[x].turnOrder),
-      data.players[x].colour,
-      parseInt(data.players[x].score)
-    );
-    gameData.players.push(p);
-  }
+  copyPlayersToGameData(data.players);
 
   fillBoard(gameData.currentPlayersTurn, gameData.boardState, gameData.players, debug);
 
@@ -131,16 +234,11 @@ function sendHome() {
 //setup the canvas for play, based on the input boxes
 $(() => {
   $("#setup-btn").click(function () {
-    //clear any existing game data and update display for immediate feedback
-    clearGameData();
+    //read/save setting parameters
     gameData.size.rows = $("#rows").val();
     gameData.size.cols = $("#cols").val();
     let playerCount = $("#playerCount").val();
-    for (let i = 0; i < playerCount; i++) {
-      gameData.players.push(new Player("", i+1,"",0));
-    }
     gameData.targetScore = $("#targetScore").val();
-    gameData.boardState = drawBoard(gameData.size);
     $("#turnInd").html("Player 1 start");
     $("#scoreDisplay").html("");
 
@@ -160,50 +258,82 @@ $(() => {
 //check turn vs client id and allow for game action to occur
 //update game state based on click and send to server to update other connected sockets
 canvas.addEventListener("mousedown", function (e) {
-  let myTurn = false;
-  //check if the turn id matches with this players id
-  for (let i = 0; i < gameData.players.length; i++) {
-    if (
-      gameData.currentPlayersTurn === gameData.players[i].turnOrder &&
-      gameData.playerID === gameData.players[i].uuid
-    ) {
-      myTurn = true;
+  if(gameData.stage === "setup"){
+    const click = getMousePos(canvas, e);
+    //params: found: "#xxx", 
+    const cl = getColourSelected(click);
+    console.log(cl);
+    if(cl.found){
+      const isAvailable = (colours.available.indexOf(cl.found) > -1) ? true : false;
+      if(isAvailable){
+
+        let playerToBeColoured = -1;
+        for(let i = 0; i < gameData.players.length; i++){
+          if(gameData.playerID === gameData.players[i].uuid && gameData.players[i].colour === "#FFF"){
+            playerToBeColoured = i;
+            const pickData = {
+              host: gameData.hostID,
+              turn: gameData.players[playerToBeColoured].turnOrder,
+              colour: cl.found
+            }
+            socket.emit("colour_selected", pickData);
+            break;
+          }
+        }
+      }      
     }
+    else{
+      $("#lobby-num").html("Lobby id: " + gameData.hostID);
+    }
+    
   }
-
-  if (myTurn) {
-    //check click position on canvas
-    let t = getMousePos(canvas, e);
-    //validate move, update board array data and calc score locally for responsiveness
-    let s = boardClick(
-      t,
-      gameData.boardState,
-      gameData.currentPlayersTurn,
-      debug
-    );
-    if (debug) console.log("click for: ");
-    if (debug) console.log(s);
-    gameData.players[gameData.currentPlayersTurn - 1].score += s.score;
-
-    //move to next turn
-    if (s.updated) gameData.currentPlayersTurn++;
-    if (gameData.currentPlayersTurn > gameData.players.length) {
-      gameData.currentPlayersTurn = 1;
+  //playing
+  else{
+    let myTurn = false;
+    //check if the turn id matches with this players id
+    for (let i = 0; i < gameData.players.length; i++) {
+      if (
+        gameData.currentPlayersTurn === gameData.players[i].turnOrder &&
+        gameData.playerID === gameData.players[i].uuid
+      ) {
+        myTurn = true;
+      }
     }
-
-    //calls update functions through socket
-    //emit to the server so that it can re-emit to all sockets in this room and update them as well (including this one)
-    //client side sockets don't have rooms
-    if (s.updated) {
-      let moveData = {
-        host: gameData.hostID,
-        row: s.row,
-        col: s.col,
-      };
-      socket.emit("move_played", moveData);
+  
+    if (myTurn) {
+      //check click position on canvas
+      const t = getMousePos(canvas, e);
+      //validate move, update board array data and calc score locally for responsiveness
+      const s = boardClick(
+        t,
+        gameData.boardState,
+        gameData.currentPlayersTurn,
+        debug
+      );
+      if (debug) console.log("click for: ");
+      if (debug) console.log(s);
+      gameData.players[gameData.currentPlayersTurn - 1].score += s.score;
+  
+      //move to next turn
+      if (s.updated) gameData.currentPlayersTurn++;
+      if (gameData.currentPlayersTurn > gameData.players.length) {
+        gameData.currentPlayersTurn = 1;
+      }
+  
+      //calls update functions through socket
+      //emit to the server so that it can re-emit to all sockets in this room and update them as well (including this one)
+      //client side sockets don't have rooms
+      if (s.updated) {
+        const moveData = {
+          host: gameData.hostID,
+          row: s.row,
+          col: s.col,
+        };
+        socket.emit("move_played", moveData);
+      }
+    } else {
+      if (debug) console.log("not your turn");
     }
-  } else {
-    if (debug) console.log("not your turn");
   }
 });
 
@@ -221,11 +351,10 @@ function getMousePos(canvas, evt, verbose = false) {
   return coord;
 }
 
+//provide a score target estimate - sum of all possible moves / num of players
 $("#rows").change(() => {estimateTarget()});
 $("#cols").change(() => {estimateTarget()});
 $("#playerCount").change(() => {estimateTarget()});
-
-//provide a score target estimate - sum of all possible moves / num of players
 function estimateTarget(){
   const r = $("#rows").val();
   const c = $("#cols").val();
@@ -603,7 +732,9 @@ function updateGameDisplay() {
   $("#playerCount").val(gameData.players.length);
   $("#targetScore").val(gameData.targetScore);
   const pl = getPlayerFromTurn(gameData.currentPlayersTurn, gameData.players);
-  $("#player-num").html('<span style="color: ' + pl.colour + '">Player ' + pl.turnOrder + 's </span>turn!');
+  if(pl != -1){
+    $("#player-num").html('<span style="color: ' + pl.colour + '">Player ' + pl.turnOrder + 's </span>turn!');
+  }
 }
 
 //update HTML to display scores
@@ -660,6 +791,7 @@ function clearGameData() {
   gameData.currentPlayersTurn = 1;
   gameData.players.length = 0;
   gameData.targetScore = 100;
+  canvasCtx.clearRect(0,0,canvas.width, canvas.height);
 }
 
 //find the player data that has the turn passed in
@@ -668,5 +800,75 @@ function getPlayerFromTurn(turn, players){
     if(turn === players[i].turnOrder){
       return players[i];
     }
+  }
+  return -1;
+}
+
+//check mouse click position on canvas and determine what colour was drawn there
+function getColourSelected(clickPos){
+  let f = {found: false, index: 0};
+  if(debug) console.log(colours);
+  //ensure list has been setup before allowing this function to execute fully
+  if(colours.xCenter.length > 0){
+    for(let i = 0; i < colours.xCenter.length; i++){
+      const upperBound = colours.yCenter[i] + colours.radius;
+      const lowerBound = colours.yCenter[i] - colours.radius;
+      const leftBound = colours.xCenter[i] - colours.radius;
+      const rightBound = colours.xCenter[i] + colours.radius;
+      if(debug){
+        console.log([clickPos, upperBound, lowerBound, leftBound, rightBound]);
+      } 
+      if(clickPos.y < upperBound && clickPos.y > lowerBound && clickPos.x < rightBound && clickPos.x > leftBound){
+        f.found = colours.list[i];
+        f.index = i;
+        break;
+      }
+    }
+  }
+  return f;
+}
+
+//using the index of the colour list which is populated in line with the x,y center positions
+//clear a bounding rectangle 1px larger than the circle drawn
+function clearColourFromCanvas(index){
+  //clear the canvas of a specific colour
+  canvasCtx.clearRect(colours.xCenter[index] - colours.radius - 1, 
+    colours.yCenter[index] - colours.radius - 1,
+    colours.radius*2 + 2,
+    colours.radius*2 + 2); 
+  //remove from available options
+  const availInd = colours.available.indexOf(colours.list[index]);
+  if(availInd > -1){
+    colours.available.splice(availInd, 1);
+  } 
+}
+
+//using the index of the colour list which is populated in line with the x,y center positions
+//draw a circle in position using parameters from the colours object
+function drawColour(index){
+  //draw a circle in the position for this index
+  canvasCtx.fillStyle = colours.list[index];
+  canvasCtx.beginPath();
+  canvasCtx.arc(colours.xCenter[index], colours.yCenter[index], colours.radius, 0, 2*Math.PI);
+  canvasCtx.fill();
+  //add colour into the available options if it isn't there
+  const availInd = colours.available.indexOf(colours.list[index]);
+  if(availInd === -1){
+    colours.available.push(colours.list[index]);
+  }
+}
+
+//take an array of Player objects and replace the existing gameData Players array with the new one
+function copyPlayersToGameData(players){
+  //copy player list
+  gameData.players.length = 0;
+  for (let x = 0; x < players.length; x++) {
+    let p = new Player(
+      players[x].uuid,
+      parseInt(players[x].turnOrder),
+      players[x].colour,
+      parseInt(players[x].score)
+    );
+    gameData.players.push(p);
   }
 }
