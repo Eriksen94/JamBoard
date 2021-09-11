@@ -23,4 +23,4 @@ Design:
 Improvements:
 
 * option to fill random blocked spots when setting up
-* colour picker
+* re-join after disconnect
